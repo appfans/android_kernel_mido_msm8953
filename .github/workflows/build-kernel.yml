@@ -30,12 +30,11 @@ jobs:
       run: |
         cd kernel
         
-        # 1. 修复 vDSO 头文件生成顺序（保留之前的有效修复）
+        # 1. 修复 vDSO 头文件生成顺序
         sed -i '/^PHONY += vdso_install/,/^$/d' arch/arm64/Makefile
         sed -i '/^prepare: vdso_prepare/a vdso_prepare: prepare0\n\t$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h' arch/arm64/Makefile
         
-        # 2. 【关键修复】强制替换 clang 目录下的 ld 符号链接为 ld.lld
-        # 确保 vDSO 等组件链接时调用正确的 LLVM 链接器
+        # 2. 替换 clang 目录下的 ld 符号链接为 ld.lld
         rm -f "${CLANG_PATH}/ld"
         ln -s "${CLANG_PATH}/ld.lld" "${CLANG_PATH}/ld"
         
@@ -45,7 +44,13 @@ jobs:
         # 4. 禁用不兼容的编译器选项
         scripts/config --file out/.config --disable CC_STACKPROTECTOR_STRONG
         
-        # 5. 开始编译
+        # 5. 【关键修复】禁用有问题的摄像头驱动配置
+        # 禁用 MSM_CAMERA 相关配置，跳过 dual_cam_drop 结构体报错
+        scripts/config --file out/.config --disable CONFIG_MSM_CAMERA
+        scripts/config --file out/.config --disable CONFIG_MSM_CAMERA_SENSOR
+        scripts/config --file out/.config --disable CONFIG_MSM_CAMERA_FLASH
+        
+        # 6. 开始编译
         make -j$(nproc) O=out ARCH=arm64 \
           LLVM_IAS=1 \
           CC="${CLANG_PATH}/clang" \
