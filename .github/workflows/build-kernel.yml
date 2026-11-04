@@ -30,27 +30,21 @@ jobs:
       run: |
         cd kernel
         
-        # 1. 修复 vDSO 头文件生成顺序
+        # 1. 修复 vDSO 相关链接与头文件生成问题
         sed -i '/^PHONY += vdso_install/,/^$/d' arch/arm64/Makefile
         sed -i '/^prepare: vdso_prepare/a vdso_prepare: prepare0\n\t$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h' arch/arm64/Makefile
-        
-        # 2. 替换 clang 目录下的 ld 符号链接为 ld.lld
         rm -f "${CLANG_PATH}/ld"
         ln -s "${CLANG_PATH}/ld.lld" "${CLANG_PATH}/ld"
         
-        # 3. 生成默认配置
-        make O=out ARCH=arm64 msm8953_defconfig
+        # 2. 【核心修复】注释掉引用了缺失结构体成员的代码行
+        sed -i '868s/^/\/\//' drivers/media/platform/msm/camera_v2/isp/msm_isp_axi_util.c
+        sed -i '908s/^/\/\//' drivers/media/platform/msm/camera_v2/isp/msm_isp_axi_util.c
         
-        # 4. 禁用不兼容的编译器选项
+        # 3. 生成配置并禁用不兼容选项
+        make O=out ARCH=arm64 msm8953_defconfig
         scripts/config --file out/.config --disable CC_STACKPROTECTOR_STRONG
         
-        # 5. 【关键修复】禁用有问题的摄像头驱动配置
-        # 禁用 MSM_CAMERA 相关配置，跳过 dual_cam_drop 结构体报错
-        scripts/config --file out/.config --disable CONFIG_MSM_CAMERA
-        scripts/config --file out/.config --disable CONFIG_MSM_CAMERA_SENSOR
-        scripts/config --file out/.config --disable CONFIG_MSM_CAMERA_FLASH
-        
-        # 6. 开始编译
+        # 4. 开始编译
         make -j$(nproc) O=out ARCH=arm64 \
           LLVM_IAS=1 \
           CC="${CLANG_PATH}/clang" \
