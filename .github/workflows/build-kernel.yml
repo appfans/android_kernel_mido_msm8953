@@ -12,13 +12,13 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: appfans/android_kernel_mido_msm8953 # 你的仓库地址
-        ref: lineage-21 # 内核分支名 lineage-21
+        ref: lineage-21 # 内核分支名
         path: kernel
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        # 【修复1】加上了 binutils-aarch64-linux-gnu，解决找不到 objdump 和 ld 的问题
+        # 包含了 binutils-aarch64-linux-gnu 解决部分工具缺失
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev binutils-aarch64-linux-gnu
 
     - name: Download toolchain (AOSP Clang)
@@ -29,19 +29,28 @@ jobs:
     - name: Build kernel
       run: |
         cd kernel
-        # 【修复2】加上了这两行 sed 命令，修复 vdso_offset_sigtramp 报错
+        
+        # 1. 修复 vDSO 头文件生成顺序
         sed -i '/^PHONY += vdso_install/,/^$/d' arch/arm64/Makefile
         sed -i '/^prepare: vdso_prepare/a vdso_prepare: prepare0\n\t$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h' arch/arm64/Makefile
         
-        # 请确认defconfig文件名 msm8953_defconfig
+        # 2. 生成默认配置
         make O=out ARCH=arm64 msm8953_defconfig
         
-        # 【修复3】你刚才漏掉的就是这一行！禁用不兼容的编译器选项
+        # 3. 禁用不兼容的编译器选项
         scripts/config --file out/.config --disable CC_STACKPROTECTOR_STRONG
         
-        # 开始编译
+        # 4. 开始编译（显式指定所有 LLVM 工具链，防止调用系统自带的工具）
         make -j$(nproc) O=out ARCH=arm64 \
           CC="${CLANG_PATH}/clang" \
+          LD="${CLANG_PATH}/ld.lld" \
+          AS="${CLANG_PATH}/llvm-as" \
+          AR="${CLANG_PATH}/llvm-ar" \
+          NM="${CLANG_PATH}/llvm-nm" \
+          OBJCOPY="${CLANG_PATH}/llvm-objcopy" \
+          OBJDUMP="${CLANG_PATH}/llvm-objdump" \
+          READELF="${CLANG_PATH}/llvm-readelf" \
+          STRIP="${CLANG_PATH}/llvm-strip" \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_ARM32=arm-linux-gnueabi-
