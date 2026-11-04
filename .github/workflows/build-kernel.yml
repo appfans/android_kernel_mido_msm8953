@@ -1,25 +1,26 @@
 name: Build Mido Kernel
 
 on:
-  workflow_dispatch: # 允许你手动点击按钮触发编译
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # 使用GitHub提供的Ubuntu环境
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout kernel source
       uses: actions/checkout@v4
       with:
-        repository: appfans/android_kernel_mido_msm8953 # 你的仓库地址
-        ref: lineage-21 # 内核分支名
+        repository: appfans/android_kernel_mido_msm8953
+        ref: lineage-21
         path: kernel
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        # 【修复1】安装了 GCC 交叉编译工具链和 binutils
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+        # 【关键修复】移除了冲突的 gcc-multilib/g++-multilib 和无效的 arm-linux-gnueabi
+        # 保留 gcc-aarch64-linux-gnu 作为必需的交叉编译工具链
+        sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
 
     - name: Download toolchain (AOSP Clang)
       run: |
@@ -30,17 +31,12 @@ jobs:
       run: |
         cd kernel
         
-        # 修复 vDSO 头文件生成顺序
         sed -i '/^PHONY += vdso_install/,/^$/d' arch/arm64/Makefile
         sed -i '/^prepare: vdso_prepare/a vdso_prepare: prepare0\n\t$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h' arch/arm64/Makefile
         
-        # 生成默认配置
         make O=out ARCH=arm64 msm8953_defconfig
-        
-        # 禁用不兼容的编译器选项
         scripts/config --file out/.config --disable CC_STACKPROTECTOR_STRONG
         
-        # 【修复2】添加 LLVM_IAS=1 以启用集成汇编器
         make -j$(nproc) O=out ARCH=arm64 \
           LLVM_IAS=1 \
           CC="${CLANG_PATH}/clang" \
@@ -53,8 +49,7 @@ jobs:
           READELF="${CLANG_PATH}/llvm-readelf" \
           STRIP="${CLANG_PATH}/llvm-strip" \
           CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          CROSS_COMPILE=aarch64-linux-gnu-
 
     - name: Package with AnyKernel3
       run: |
