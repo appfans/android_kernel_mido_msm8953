@@ -18,8 +18,8 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        # 包含了 binutils-aarch64-linux-gnu 解决部分工具缺失
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev binutils-aarch64-linux-gnu
+        # 【修复1】安装了 GCC 交叉编译工具链和 binutils
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
     - name: Download toolchain (AOSP Clang)
       run: |
@@ -30,18 +30,19 @@ jobs:
       run: |
         cd kernel
         
-        # 1. 修复 vDSO 头文件生成顺序
+        # 修复 vDSO 头文件生成顺序
         sed -i '/^PHONY += vdso_install/,/^$/d' arch/arm64/Makefile
         sed -i '/^prepare: vdso_prepare/a vdso_prepare: prepare0\n\t$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h' arch/arm64/Makefile
         
-        # 2. 生成默认配置
+        # 生成默认配置
         make O=out ARCH=arm64 msm8953_defconfig
         
-        # 3. 禁用不兼容的编译器选项
+        # 禁用不兼容的编译器选项
         scripts/config --file out/.config --disable CC_STACKPROTECTOR_STRONG
         
-        # 4. 开始编译（显式指定所有 LLVM 工具链，防止调用系统自带的工具）
+        # 【修复2】添加 LLVM_IAS=1 以启用集成汇编器
         make -j$(nproc) O=out ARCH=arm64 \
+          LLVM_IAS=1 \
           CC="${CLANG_PATH}/clang" \
           LD="${CLANG_PATH}/ld.lld" \
           AS="${CLANG_PATH}/llvm-as" \
@@ -58,7 +59,6 @@ jobs:
     - name: Package with AnyKernel3
       run: |
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-        # 将编译好的内核镜像复制到AnyKernel3模板中
         cp kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
         cd AnyKernel3 && zip -r ../AnyKernel3-mido.zip . -x ".git/*"
 
