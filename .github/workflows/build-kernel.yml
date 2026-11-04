@@ -18,13 +18,14 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        # 已移除冲突的 multilib 包，保留必需的交叉编译工具链
         sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
 
     - name: Download toolchain (AOSP Clang)
       run: |
         git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
         echo "CLANG_PATH=${GITHUB_WORKSPACE}/clang/bin" >> $GITHUB_ENV
+        # 【新增】将工具链目录加入系统 PATH，确保 clang 能找到自带的 ld.lld
+        echo "${GITHUB_WORKSPACE}/clang/bin" >> $GITHUB_PATH
 
     - name: Build kernel
       run: |
@@ -34,8 +35,8 @@ jobs:
         sed -i '/^PHONY += vdso_install/,/^$/d' arch/arm64/Makefile
         sed -i '/^prepare: vdso_prepare/a vdso_prepare: prepare0\n\t$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h' arch/arm64/Makefile
         
-        # 2. 修复 vDSO 链接器错误：强制 Makefile 使用 $(LD) 而不是 $(CC) 来链接
-        sed -i 's/$(CC) $(c_flags) -shared/$(LD) $(ld_flags) -shared/' arch/arm64/kernel/vdso/Makefile
+        # 2. 【关键修复】强制 vDSO 编译使用 LLVM 的 lld 链接器，解决 /usr/bin/ld 报错
+        sed -i 's|$(CC) $(c_flags) -shared|$(CC) $(c_flags) -shared -fuse-ld=lld|g' arch/arm64/kernel/vdso/Makefile
         
         # 3. 生成默认配置
         make O=out ARCH=arm64 msm8953_defconfig
@@ -43,7 +44,7 @@ jobs:
         # 4. 禁用不兼容的编译器选项
         scripts/config --file out/.config --disable CC_STACKPROTECTOR_STRONG
         
-        # 5. 开始编译（显式指定所有工具链，防止调用系统工具）
+        # 5. 开始编译
         make -j$(nproc) O=out ARCH=arm64 \
           LLVM_IAS=1 \
           CC="${CLANG_PATH}/clang" \
