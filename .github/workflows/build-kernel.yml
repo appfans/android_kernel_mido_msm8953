@@ -24,19 +24,20 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
         echo "CLANG_PATH=${GITHUB_WORKSPACE}/clang/bin" >> $GITHUB_ENV
-        # 【新增】将工具链目录加入系统 PATH，确保 clang 能找到自带的 ld.lld
         echo "${GITHUB_WORKSPACE}/clang/bin" >> $GITHUB_PATH
 
     - name: Build kernel
       run: |
         cd kernel
         
-        # 1. 修复 vDSO 头文件生成顺序
+        # 1. 修复 vDSO 头文件生成顺序（保留之前的有效修复）
         sed -i '/^PHONY += vdso_install/,/^$/d' arch/arm64/Makefile
         sed -i '/^prepare: vdso_prepare/a vdso_prepare: prepare0\n\t$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h' arch/arm64/Makefile
         
-        # 2. 【关键修复】强制 vDSO 编译使用 LLVM 的 lld 链接器，解决 /usr/bin/ld 报错
-        sed -i 's|$(CC) $(c_flags) -shared|$(CC) $(c_flags) -shared -fuse-ld=lld|g' arch/arm64/kernel/vdso/Makefile
+        # 2. 【关键修复】强制替换 clang 目录下的 ld 符号链接为 ld.lld
+        # 确保 vDSO 等组件链接时调用正确的 LLVM 链接器
+        rm -f "${CLANG_PATH}/ld"
+        ln -s "${CLANG_PATH}/ld.lld" "${CLANG_PATH}/ld"
         
         # 3. 生成默认配置
         make O=out ARCH=arm64 msm8953_defconfig
